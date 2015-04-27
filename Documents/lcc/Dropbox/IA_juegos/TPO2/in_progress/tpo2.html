@@ -1,0 +1,282 @@
+<!doctype html> 
+<html lang="en"> 
+<head> 
+	<meta charset="UTF-8" />
+    <title>Phaser</title>
+	<script type="text/javascript" src="js/phaser.min.js"></script>
+    <script type="text/javascript" src="js/final_npc.js"></script>
+    <style type="text/css">
+        body {
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+
+<script type="text/javascript">
+
+var game = new Phaser.Game(800, 600, Phaser.AUTO, '', { preload: preload, create: create, update: update });
+
+var player;
+var ovni;
+var platforms;
+var cursors;
+var bombs;
+var hearts;
+var score = 0;
+var scoreText;
+
+function preload() {
+	game.load.image('sky', 'assets/sky.png');
+	game.load.image('ground', 'assets/platform.png');
+	game.load.image('heart', 'assets/heart.png');
+	game.load.spritesheet('dude','assets/dude.png', 32, 48);
+    game.load.image('bomb','assets/bomb.png')
+    game.load.spritesheet('ovni', 'assets/ovni.png', 116, 81);
+}
+
+function create() {
+	//  We're going to be using physics, so enable the Arcade Physics system
+    game.physics.startSystem(Phaser.Physics.ARCADE);
+
+    //  A simple background for our game
+    game.add.sprite(0, 0, 'sky');
+
+    //  The platforms group contains the ground and the 2 ledges we can jump on
+    platforms = game.add.group();
+
+    //  We will enable physics for any object that is created in this group
+    platforms.enableBody = true;
+
+    bombs = game.add.group();
+    bombs.enableBody = true;
+
+    // Here we create the ground.
+    var ground = platforms.create(0, game.world.height - 64, 'ground');
+
+    //  Scale it to fit the width of the game (the original sprite is 400x32 in size)
+    ground.scale.setTo(2, 2);
+
+    //  This stops it from falling away when you jump on it
+    ground.body.immovable = true;
+
+    init_player();
+
+    var player_gravity = place_ledges();
+    player.body.gravity.y = player_gravity;
+
+   //  Finally some hearts to collect
+    hearts = game.add.group();
+
+    //  We will enable physics for any heart that is created in this group
+    hearts.enableBody = true;
+
+    place_hearts();
+
+    init_ovni();
+
+	scoreText = game.add.text(1, 1, 'score: 0', { fontSize: '8px', fill: '#000' });
+
+    //  Our controls.
+    cursors = game.input.keyboard.createCursorKeys(); 
+}
+
+function update() {
+
+    if(ended_game()){
+        player.animations.stop();
+        player.frame = 4;
+        player.body.velocity.x = 0;
+        player.body.velocity.y = 0;
+    } else
+    {
+        //  Collide the player and the hearts with the platforms
+        game.physics.arcade.collide(player, platforms);
+        game.physics.arcade.collide(hearts, platforms);
+        game.physics.arcade.collide(bombs, platforms);
+        game.physics.arcade.collide(player, ovni);
+
+        //  Reset the players velocity (movement)
+        player.body.velocity.x = 0;
+
+        if (cursors.left.isDown)
+        {
+            //  Move to the left
+            player.body.velocity.x = -165;
+            player.animations.play('left');
+        }
+        else if (cursors.right.isDown)
+        {
+            //  Move to the right
+            player.body.velocity.x = 155;
+            player.animations.play('right');
+        }
+        else
+        {
+            //  Stand still
+            player.animations.stop();
+            player.frame = 4;
+        }
+        
+        //  Allow the player to jump if they are touching the ground.
+        if (cursors.up.isDown && player.body.touching.down)
+        {
+            player.body.velocity.y = -350;
+        }
+
+    	game.physics.arcade.overlap(player, hearts, collect_heart, null, this);
+    	game.physics.arcade.collide(hearts, hearts, collide_hearts, null, this);
+        game.physics.arcade.overlap(player, bombs, game_over, null, this);
+
+        if(hearts.countLiving()==0) {
+            show_win_msg();
+        }
+    }
+}
+
+
+function ended_game(){
+    return scoreText.text.contains('perdiste') || scoreText.text.contains('Ganaste');
+}
+
+function game_over(player, bomb){
+    player.body.rotation = 180;
+    scoreText.text = "uhh ohh :( perdiste...";
+}
+
+function init_ovni(){
+    ovni = game.add.sprite('ovni');
+    sprite = new NPC(game, 'ovni');
+    ovni = game.add.existing(sprite);
+    game.physics.arcade.enable(ovni);
+    ovni.body.collideWorldBounds = true;
+    ovni.body.immovable = true;
+
+    //ovni.animations.add('left', [0,1,2], 10, true);
+    //ovni.animations.add('right', [2,1,0], 10, true);
+}
+
+function init_player(){
+
+    player = game.add.sprite(32, game.world.height - 150, 'dude');
+
+    //  We need to enable physics on the player
+    game.physics.arcade.enable(player);
+
+    //  Player physics properties. Give the little guy a slight bounce.
+    player.body.bounce.y = 0.2;
+    player.body.collideWorldBounds = true;
+
+    //  Our two animations, walking left and right.
+    player.animations.add('left', [0, 1, 2, 3], 10, true);
+    player.animations.add('right', [5, 6, 7, 8], 10, true);
+
+}
+
+function show_win_msg(){
+    scoreText.text = 'Ganaste!';
+}
+
+function collect_heart (player, heart) {
+    
+    remove_object(heart);
+    //  Add and update the score
+    score += 1;
+    scoreText.text = 'Score: ' + score;
+    rain_bomb();
+    if(hearts.countLiving() == 1){
+        rain_bomb();
+        rain_bomb();
+    }
+}
+
+function remove_object(objt){
+    // Removes the objt from the screen
+    objt.kill();
+}
+function place_ledges(){
+    var ledge;
+    var ledge_x;
+    var ledge_y;
+    var min_gravity = 250;
+
+    for (var i=1; i<=3; i++) {
+        
+        ledge_x = game.world.width - game.world.width*Math.random();
+        ledge_y = game.world.height - game.world.height*Math.random();
+
+        ledge = platforms.create(ledge_x, ledge_y, 'ground');
+        ledge.body.immovable = true;
+
+        if(min_gravity<ledge_y) {
+            min_gravity = ledge_y;
+        }
+    }
+
+    return min_gravity + 10;
+}
+
+function rain_bomb(){
+    var x_pos;
+    var y_pos;
+
+    for (var i = 1; i < 5; i++)
+    {
+
+        x_pos = game.world.width - game.world.width*Math.random();
+        y_pos = game.world.height - game.world.height*Math.random();
+
+        //  Create a heart inside of the 'hearts' group
+        var bomb = bombs.create(x_pos, y_pos, 'bomb');
+        
+        if(i%2==0){
+            bomb.body.collideWorldBounds = false;
+        } else
+        {
+            bomb.body.collideWorldBounds = true;
+            bomb.body.bounce.y = 0.7 + Math.random() * 0.2;
+        }
+        //  Let gravity do its thing
+        bomb.body.gravity.y = 100*Math.random();
+        //enable the heart to fire an event when it leves the screen boundaries.
+        bomb.checkWorldBounds = true; 
+        bomb.events.onOutOfBounds.add(this.remove_object, this);
+    }
+}
+
+function place_hearts(){
+
+    var x_pos;
+    var y_pos;
+
+    for (var i = 0; i < 11*Math.random(); i++)
+    {
+
+        x_pos = game.world.width - game.world.width*Math.random();
+        y_pos = game.world.height - game.world.height*Math.random();
+
+        //  Create a heart inside of the 'hearts' group
+        var heart = hearts.create(x_pos, y_pos, 'heart');
+        
+        heart.width=24;
+        heart.height=22;
+
+        //  Let gravity do its thing
+        heart.body.gravity.y = 275;
+        //enable the heart to fire an event when it leves the screen boundaries.
+        heart.checkWorldBounds = true; 
+        heart.events.onOutOfBounds.add(this.remove_object, this);
+        //  This just gives each heart a slightly random bounce value
+        heart.body.bounce.y = 0.7 + Math.random() * 0.2;
+    }
+}
+
+function collide_hearts (heart1, heart2) {
+    heart2.rotation = 10*Math.random() + heart2.rotation;
+    heart1.rotation = 10*Math.random() + heart1.rotation;
+}
+
+</script>
+
+</body>
+</html>
